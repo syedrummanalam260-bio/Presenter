@@ -1,127 +1,146 @@
 import streamlit as st
 import re
-from google import genai
-from google.genai import types
+import os
+import tempfile
+from collections import Counter
+from pypdf import PdfReader
 
 # ---------------------------------------------------------
 # UI CONFIGURATION & STYLING
 # ---------------------------------------------------------
-st.set_page_config(page_title="AI Presentation Architect", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Deterministic Presentation Architect", page_icon="📊", layout="wide")
 
-st.title("Autonomous AI Presentation Generator")
-st.markdown("Generate publication-ready slide decks using the Agentic Loop and Marp Markdown engine.")
+st.title("Extractive NLP Presentation Generator")
+st.markdown("Upload source materials (PDFs/TXT) and generate a presentation using deterministic statistical summarization (Zero Generative AI).")
 
-# ---------------------------------------------------------
-# SIDEBAR: CREDENTIALS & SETTINGS
-# ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Configuration")
-    api_key = st.text_input("Gemini API Key", type="password", help="Enter your Google Gemini API key.")
     slide_count = st.slider("Target Slide Count", min_value=5, max_value=25, value=10)
     visual_style = st.selectbox("Visual Theme", ["default", "gaia", "uncover"])
-    
     st.markdown("---")
-    st.markdown("**Model Configuration**")
-    active_model = st.text_input("Agentic Model", value="gemini-3.6-flash")
-    
-    st.markdown("---")
-    st.markdown("**Render Strategy**: Marp Markdown")
+    st.markdown("**Engine**: Pure Python Extractive NLP\n**Render Strategy**: Marp Markdown")
 
 # ---------------------------------------------------------
-# AGENTIC LOOP LOGIC
+# DETERMINISTIC NLP LOGIC (EXTRACTIVE SUMMARIZATION)
 # ---------------------------------------------------------
-def agentic_presentation_loop(api_key: str, prompt: str, slide_count: int, theme: str, model_id: str) -> str:
-    """Executes a multi-agent workflow to research, draft, and refine a presentation."""
+def extract_text(uploaded_files) -> str:
+    """Extracts raw text from uploaded PDF and TXT files."""
+    combined_text = ""
+    for uploaded_file in uploaded_files:
+        if uploaded_file.name.endswith('.pdf'):
+            pdf_reader = PdfReader(uploaded_file)
+            for page in pdf_reader.pages:
+                text = page.extract_text()
+                if text:
+                    combined_text += text + "\n "
+        elif uploaded_file.name.endswith('.txt'):
+            combined_text += uploaded_file.getvalue().decode("utf-8") + "\n "
+    return combined_text
+
+def extractive_summarization(text: str, num_sentences: int) -> list:
+    """
+    Uses mathematical word frequency to score and extract the most important sentences.
+    This guarantees 0% hallucination as it only pulls exact quotes from the text.
+    """
+    # 1. Clean and split into sentences based on punctuation
+    text = text.replace('\n', ' ')
+    sentences = re.split(r'(?<=[.!?]) +', text)
     
-    # Initialize the standard Google GenAI client
-    client = genai.Client(api_key=api_key)
+    # 2. Define basic stopwords to ignore in scoring
+    stopwords = {'the', 'is', 'in', 'and', 'to', 'of', 'a', 'with', 'for', 'on', 'as', 'by', 'an', 'that', 'this', 'it', 'are', 'from', 'be', 'or'}
     
-    # Phase 1: Research & Outline
-    st.info(f"Phase 1: Agent researching and structuring outline using {model_id}...")
-    outline_prompt = (
-        f"Act as a Principal Research Scientist. Create a highly structured, logical outline for a "
-        f"{slide_count}-slide presentation on the following topic:\n\n{prompt}\n\n"
-        "Detail the title, main bullet points, and the scientific narrative flow for each slide."
-    )
-    outline_response = client.models.generate_content(
-        model=model_id,
-        contents=outline_prompt
-    )
+    # 3. Calculate word frequencies across the entire document
+    words = re.findall(r'\w+', text.lower())
+    word_counts = Counter(w for w in words if w not in stopwords)
     
-    # Phase 2 & 3: Self-Critique, Refinement, and Code-to-Slide Generation
-    st.info(f"Phase 2: Agent refining narrative and injecting Marp Markdown syntax using {model_id}...")
-    marp_prompt = (
-        f"Review the following presentation outline for scientific accuracy and flow:\n\n"
-        f"{outline_response.text}\n\n"
-        f"Now, convert this into a finalized, highly professional presentation using Marp Markdown format. "
-        f"Strict Requirements:\n"
-        f"1. Start with YAML frontmatter: `marp: true`, `theme: {theme}`, `paginate: true`.\n"
-        f"2. Separate each slide with `---`.\n"
-        f"3. Do not clutter slides with too much text. Use bullet points.\n"
-        f"4. Where a diagram or chart is conceptually needed, use standard markdown image syntax with a placeholder: "
-        f"![width:600px](https://via.placeholder.com/600x400?text=Insert+Diagram+Here).\n"
-        f"Output ONLY the raw markdown block. Do not include conversational text."
-    )
+    # 4. Score each sentence based on the frequency of its words
+    scores = {}
+    for i, sentence in enumerate(sentences):
+        sentence_words = re.findall(r'\w+', sentence.lower())
+        score = sum(word_counts.get(w, 0) for w in sentence_words)
+        
+        # Normalize by length to favor medium-length, dense sentences (avoiding 3-word or 100-word sentences)
+        word_count = len(sentence_words)
+        if 8 < word_count < 35: 
+            scores[i] = score / word_count
+        else:
+            scores[i] = 0
+
+    # 5. Extract the top-scoring sentences and sort them back into chronological order
+    top_indices = sorted(scores, key=scores.get, reverse=True)[:num_sentences]
+    top_indices.sort() 
     
-    final_response = client.models.generate_content(
-        model=model_id,
-        contents=marp_prompt
-    )
+    return [sentences[i].strip() for i in top_indices if sentences[i].strip()]
+
+def build_marp_presentation(sentences: list, target_slides: int, theme: str) -> str:
+    """Chunks the extracted sentences into Markdown presentation slides."""
     
-    # Clean output to extract just the markdown
-    match = re.search(r"```markdown\n(.*?)```", final_response.text, re.DOTALL)
-    if match:
-        return match.group(1)
+    # Standard Marp YAML Frontmatter
+    md = f"---\nmarp: true\ntheme: {theme}\npaginate: true\n---\n\n"
+    md += "# Executive Summary\n\n*An automatic extraction from source documents.*\n\n---\n\n"
     
-    # Fallback if the model didn't use code fences
-    return final_response.text
+    # Calculate how many sentences to put on each slide (approx 3-4 per slide)
+    sentences_per_slide = max(1, len(sentences) // target_slides)
+    
+    slide_number = 1
+    for i in range(0, len(sentences), sentences_per_slide):
+        chunk = sentences[i:i + sentences_per_slide]
+        if not chunk:
+            continue
+            
+        md += f"## Key Findings: Section {slide_number}\n\n"
+        for sentence in chunk:
+            md += f"- {sentence}\n"
+        md += "\n---\n\n"
+        slide_number += 1
+        
+    # Remove the very last '---' separator to cleanly end the file
+    return md.strip().rstrip("---").strip()
 
 # ---------------------------------------------------------
 # MAIN INTERFACE
 # ---------------------------------------------------------
-user_prompt = st.text_area(
-    "Enter your presentation topic or research abstract:",
-    value="The Role of MicroRNA in Abiotic Stress Regulation: Special Emphasis on Millets",
-    height=150
+st.markdown("### 1. Upload Source Materials (Required)")
+uploaded_source_files = st.file_uploader(
+    "Upload PDFs or Text files (.txt). The algorithm will extract the most mathematically significant sentences.", 
+    accept_multiple_files=True,
+    type=['pdf', 'txt']
 )
 
-if st.button("🚀 Architect Presentation"):
-    if not api_key:
-        st.error("Please enter your Gemini API Key in the sidebar.")
-    elif not user_prompt:
-        st.warning("Please provide a presentation prompt.")
+if st.button("🚀 Generate Deterministic Presentation"):
+    if not uploaded_source_files:
+        st.warning("Please upload at least one source file to process.")
     else:
-        with st.spinner("Initializing Agentic Loop..."):
+        with st.spinner("Analyzing document statistics and extracting data..."):
             try:
-                # Execute the loop
-                final_markdown = agentic_presentation_loop(
-                    api_key, 
-                    user_prompt, 
-                    slide_count, 
-                    visual_style,
-                    active_model
-                )
+                # Step 1: Extract Text
+                raw_text = extract_text(uploaded_source_files)
                 
-                st.success("Presentation successfully generated!")
-                
-                # Display output
-                st.markdown("### Marp Markdown Source")
-                st.code(final_markdown, language="markdown")
-                
-                # Provide Download Button
-                st.download_button(
-                    label="📥 Download .md File (Ready for Marp)",
-                    data=final_markdown,
-                    file_name="scientific_presentation.md",
-                    mime="text/markdown"
-                )
-                
-                st.markdown(
-                    "> **Next Step:** Install the [Marp for VS Code](https://marp.app/) extension, "
-                    "open the downloaded `.md` file, and click the Marp icon to instantly export "
-                    "to a beautifully animated PDF, HTML, or PowerPoint `.pptx` file."
-                )
+                if len(raw_text.strip()) < 100:
+                    st.error("Not enough text could be extracted from these files. Ensure PDFs are text-searchable (not just images).")
+                else:
+                    # Step 2: Calculate target sentences (e.g., 10 slides * 3 bullet points = 30 sentences)
+                    target_sentences = slide_count * 3
+                    
+                    # Step 3: Extractive Summarization
+                    top_sentences = extractive_summarization(raw_text, target_sentences)
+                    
+                    # Step 4: Build Presentation
+                    final_markdown = build_marp_presentation(top_sentences, slide_count, visual_style)
+                    
+                    st.success("✅ Presentation successfully generated based purely on document data!")
+                    
+                    # Display output
+                    st.markdown("### Marp Markdown Source")
+                    st.code(final_markdown, language="markdown")
+                    
+                    # Provide Download Button
+                    st.download_button(
+                        label="📥 Download .md File (Ready for Marp)",
+                        data=final_markdown,
+                        file_name="extractive_presentation.md",
+                        mime="text/markdown"
+                    )
 
             except Exception as e:
-                st.error(f"Pipeline Error: {str(e)}")
-                st.info("Tip: If you see a '404 NOT_FOUND' error, verify your API key has access to the specified model string.")
+                st.error(f"Processing Error: {str(e)}")
