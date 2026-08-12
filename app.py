@@ -23,8 +23,8 @@ with st.sidebar:
     # Adding a model selector in case API strings change in the future
     st.markdown("---")
     st.markdown("**Model Configuration**")
-    flash_model = st.text_input("Drafting Model", value="gemini-2.5-flash")
-    pro_model = st.text_input("Refinement Model", value="gemini-2.5-pro")
+    flash_model = st.text_input("Drafting Model", value="gemini-1.5-flash")
+    pro_model = st.text_input("Refinement Model", value="gemini-1.5-pro")
     
     st.markdown("---")
     st.markdown("**Render Strategy**: Marp Markdown")
