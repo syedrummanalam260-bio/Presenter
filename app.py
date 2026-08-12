@@ -19,32 +19,39 @@ with st.sidebar:
     api_key = st.text_input("Gemini API Key", type="password", help="Enter your Google Gemini API key.")
     slide_count = st.slider("Target Slide Count", min_value=5, max_value=25, value=10)
     visual_style = st.selectbox("Visual Theme", ["default", "gaia", "uncover"])
+    
+    # Adding a model selector in case API strings change in the future
     st.markdown("---")
-    st.markdown("**Engine**: Gemini 3.6 Flash / Pro\n**Render Strategy**: Marp Markdown")
+    st.markdown("**Model Configuration**")
+    flash_model = st.text_input("Drafting Model", value="gemini-2.5-flash")
+    pro_model = st.text_input("Refinement Model", value="gemini-2.5-pro")
+    
+    st.markdown("---")
+    st.markdown("**Render Strategy**: Marp Markdown")
 
 # ---------------------------------------------------------
 # AGENTIC LOOP LOGIC
 # ---------------------------------------------------------
-def agentic_presentation_loop(api_key: str, prompt: str, slide_count: int, theme: str) -> str:
+def agentic_presentation_loop(api_key: str, prompt: str, slide_count: int, theme: str, flash_id: str, pro_id: str) -> str:
     """Executes a multi-agent workflow to research, draft, and refine a presentation."""
     
     # Initialize the standard Google GenAI client
     client = genai.Client(api_key=api_key)
     
-    # Phase 1: Research & Outline (Simulating standard flash for speed)
-    st.info("Phase 1: Agent researching and structuring outline...")
+    # Phase 1: Research & Outline (Using the faster Flash model)
+    st.info(f"Phase 1: Agent researching and structuring outline using {flash_id}...")
     outline_prompt = (
         f"Act as a Principal Research Scientist. Create a highly structured, logical outline for a "
         f"{slide_count}-slide presentation on the following topic:\n\n{prompt}\n\n"
         "Detail the title, main bullet points, and the scientific narrative flow for each slide."
     )
     outline_response = client.models.generate_content(
-        model='gemini-3.6-flash',
+        model=flash_id,
         contents=outline_prompt
     )
     
-    # Phase 2 & 3: Self-Critique, Refinement, and Code-to-Slide Generation (Simulating pro for complex formatting)
-    st.info("Phase 2: Agent refining narrative and injecting Marp Markdown syntax...")
+    # Phase 2 & 3: Self-Critique, Refinement, and Code-to-Slide Generation (Using the Pro model)
+    st.info(f"Phase 2: Agent refining narrative and injecting Marp Markdown syntax using {pro_id}...")
     marp_prompt = (
         f"Review the following presentation outline for scientific accuracy and flow:\n\n"
         f"{outline_response.text}\n\n"
@@ -59,7 +66,7 @@ def agentic_presentation_loop(api_key: str, prompt: str, slide_count: int, theme
     )
     
     final_response = client.models.generate_content(
-        model='gemini-3.6-pro',
+        model=pro_id,
         contents=marp_prompt
     )
     
@@ -89,7 +96,14 @@ if st.button("🚀 Architect Presentation"):
         with st.spinner("Initializing Agentic Loop..."):
             try:
                 # Execute the loop
-                final_markdown = agentic_presentation_loop(api_key, user_prompt, slide_count, visual_style)
+                final_markdown = agentic_presentation_loop(
+                    api_key, 
+                    user_prompt, 
+                    slide_count, 
+                    visual_style,
+                    flash_model,
+                    pro_model
+                )
                 
                 st.success("Presentation successfully generated!")
                 
@@ -113,3 +127,4 @@ if st.button("🚀 Architect Presentation"):
 
             except Exception as e:
                 st.error(f"Pipeline Error: {str(e)}")
+                st.info("Tip: If you see a '404 NOT_FOUND' error, the selected model versions in the sidebar are not supported by your current API access tier. Try changing them to 'gemini-1.5-pro' and 'gemini-1.5-flash'.")
